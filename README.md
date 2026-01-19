@@ -1,6 +1,6 @@
 # v0-clone
 
-A reimagined frontend generation engine with fluid animations, real-time preview, and visual editing capabilities.
+A production-ready AI UI generation engine with intent-aware prompting, visual editing, and real-time preview.
 
 ## Quick Start
 
@@ -12,8 +12,30 @@ bun install
 bun run dev:studio
 
 # Open in browser
-open http://localhost:5173
+open http://localhost:5200
 ```
+
+## What Makes This Different
+
+### Intent-Aware Generation
+
+Unlike basic prompt-to-code tools, v0-clone detects what you're trying to build and tailors the output:
+
+| Prompt | Detected Intent | Output |
+|--------|-----------------|--------|
+| "Create a SaaS landing page" | `page` | Complete page with nav, hero, features, pricing, footer |
+| "Build a todo app" | `app` | Functional app with state management and interactions |
+| "Make a pricing section" | `section` | Self-contained section ready to embed |
+| "Design a button component" | `component` | Reusable component with variants |
+
+### Production-Ready Output
+
+Every generation includes:
+- **Real images** from Unsplash (no broken placeholders)
+- **Realistic content** (no Lorem ipsum)
+- **Mobile responsive** design with Tailwind breakpoints
+- **Accessible** markup with proper ARIA attributes
+- **Working interactivity** using Svelte 5 runes
 
 ## Architecture
 
@@ -22,75 +44,67 @@ v0-clone/
 ├── apps/
 │   └── studio/          # Svelte 5 visual editor
 ├── packages/
-│   ├── shared/          # Shared types and utilities
-│   ├── llm/             # Pluggable LLM provider (Claude, OpenAI, Ollama)
-│   ├── pipeline/        # Generation pipeline with telemetry
+│   ├── shared/          # Shared types, validation, Chronicle
+│   ├── llm/             # Pluggable LLM providers
+│   ├── pipeline/        # Generation pipeline with stages
 │   └── renderer/        # iframe preview sandbox
-└── openspec/            # Spec-driven development (Phase 2)
+└── openspec/            # Spec-driven development
 ```
 
 ## Features
 
-### Phase 1 (Current)
-- [x] Svelte 5 studio with fluid animations
-- [x] Pluggable LLM provider system (hot-swap between Claude/OpenAI/Ollama)
-- [x] Full pipeline stub with timing telemetry
-- [x] iframe preview sandbox with postMessage communication
-- [x] File loading (markdown, images)
-- [x] DevInfo panel for observability (`--dev-info` flag)
-- [x] Responsive split-pane layout
+### Generation Pipeline
+- **Parse Stage**: Intent detection from natural language
+- **Generate Stage**: LLM generation with intent-specific prompts
+- **Validate Stage**: Structure, accessibility, and image URL validation
+- **Render Stage**: Preview compilation with Tailwind
 
-### Phase 2 (Coming)
-- [ ] WASM parser for code analysis
-- [ ] Web Worker offloading
-- [ ] Full LLM integration with streaming
-- [ ] TypeScript AST-based code generation
-- [ ] data-oid source mapping (Onlook pattern)
+### Visual Editor
+- Split-pane layout with resizable panels
+- Real-time preview with hot reload
+- Element selection and style inspection
+- Context menu for quick actions
+- Code inspector with syntax highlighting
 
-### Phase 3 (Future)
-- [ ] Visual drag-and-drop editing
-- [ ] Two-way sync: visual ↔ code
-- [ ] Inspector/devtools panel
-- [ ] Export to standalone project
+### Chronicle (Persistence)
+- IndexedDB-based history tracking
+- Project and snapshot management
+- Artifact versioning with metadata
+- Activity calendar visualization
+
+### LLM Providers
+- Claude (Anthropic)
+- OpenAI (GPT-4)
+- Ollama (local)
+- LM Studio (local)
+- Zhipu (GLM-4)
 
 ## Configuration
 
 ### LLM Provider
 
-Set environment variables or configure at runtime:
-
 ```bash
-# Use Claude (default)
-export LLM_PROVIDER=claude
+# Claude (default if ANTHROPIC_API_KEY is set)
 export ANTHROPIC_API_KEY=your-key
 
-# Use OpenAI
+# OpenAI
 export LLM_PROVIDER=openai
 export OPENAI_API_KEY=your-key
 
-# Use Ollama (local)
+# Ollama (local, no API key needed)
 export LLM_PROVIDER=ollama
 export OLLAMA_BASE_URL=http://localhost:11434
+
+# LM Studio
+export LLM_PROVIDER=lmstudio
+export LMSTUDIO_BASE_URL=http://localhost:1234/v1
 ```
 
-### Dev Mode
-
-Enable telemetry with the `DEV_INFO` flag:
+### Model Override
 
 ```bash
-# Via environment variable
-export DEV_INFO=true
-
-# Via URL parameter
-http://localhost:5173?dev
+export LLM_MODEL=claude-sonnet-4-20250514
 ```
-
-## Tech Stack
-
-- **Frontend**: Svelte 5 + TailwindCSS 4
-- **Build**: Bun + Vite
-- **LLM**: Pluggable (Claude, OpenAI, Ollama)
-- **Styling**: CSS Variables + Tailwind utilities
 
 ## Development
 
@@ -98,7 +112,10 @@ http://localhost:5173?dev
 # Run studio in dev mode
 bun run dev:studio
 
-# Type check all packages
+# Build all packages
+bun run build
+
+# Type check
 bun run typecheck
 
 # Format code
@@ -108,9 +125,21 @@ bun run format
 bun run lint
 ```
 
+## Tech Stack
+
+- **Frontend**: Svelte 5 + TailwindCSS 4
+- **Build**: Bun + Vite
+- **LLM**: Pluggable multi-provider system
+- **Persistence**: IndexedDB (Chronicle)
+- **Validation**: MDN compat, semantic HTML, a11y
+
 ## Performance Targets
 
 - Frame budget: <10ms (60fps)
 - HMR updates: <20ms
-- Preview refresh: <50ms end-to-end
-- Generation streaming: first token <500ms
+- Preview refresh: <50ms
+- First token: <500ms
+
+## License
+
+MIT
