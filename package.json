@@ -1,0 +1,27 @@
+{
+  "name": "v0-clone",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "bun run --filter '*' dev",
+    "dev:studio": "bun run --filter @v0-clone/studio dev",
+    "dev:all": "concurrently -n pb,studio -c blue,green \"pocketbase serve\" \"bun run dev:studio\"",
+    "setup:db": "bun run scripts/setup-pocketbase.ts",
+    "build": "bun run --filter '*' build",
+    "lint": "biome lint .",
+    "format": "biome format --write .",
+    "check": "biome check .",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^1.9.4",
+    "@types/node": "^25.0.9",
+    "concurrently": "^9.1.2",
+    "typescript": "^5.7.2"
+  }
+}
