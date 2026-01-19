@@ -1,0 +1,269 @@
+[
+  {
+    "id": "conversations0001",
+    "name": "conversations",
+    "type": "base",
+    "system": false,
+    "schema": [
+      {
+        "id": "conv_title0001",
+        "name": "title",
+        "type": "text",
+        "system": false,
+        "required": true,
+        "options": {
+          "min": 1,
+          "max": 500,
+          "pattern": ""
+        }
+      },
+      {
+        "id": "conv_status001",
+        "name": "status",
+        "type": "select",
+        "system": false,
+        "required": true,
+        "options": {
+          "maxSelect": 1,
+          "values": ["active", "archived"]
+        }
+      },
+      {
+        "id": "conv_meta0001",
+        "name": "metadata",
+        "type": "json",
+        "system": false,
+        "required": false,
+        "options": {
+          "maxSize": 2000000
+        }
+      }
+    ],
+    "indexes": [],
+    "listRule": "",
+    "viewRule": "",
+    "createRule": "",
+    "updateRule": "",
+    "deleteRule": ""
+  },
+  {
+    "id": "messages00001",
+    "name": "messages",
+    "type": "base",
+    "system": false,
+    "schema": [
+      {
+        "id": "msg_conv00001",
+        "name": "conversation",
+        "type": "relation",
+        "system": false,
+        "required": true,
+        "options": {
+          "collectionId": "conversations0001",
+          "cascadeDelete": true,
+          "minSelect": null,
+          "maxSelect": 1,
+          "displayFields": ["title"]
+        }
+      },
+      {
+        "id": "msg_role00001",
+        "name": "role",
+        "type": "select",
+        "system": false,
+        "required": true,
+        "options": {
+          "maxSelect": 1,
+          "values": ["user", "assistant", "system"]
+        }
+      },
+      {
+        "id": "msg_content01",
+        "name": "content",
+        "type": "text",
+        "system": false,
+        "required": true,
+        "options": {
+          "min": 1,
+          "max": 100000,
+          "pattern": ""
+        }
+      },
+      {
+        "id": "msg_meta00001",
+        "name": "metadata",
+        "type": "json",
+        "system": false,
+        "required": false,
+        "options": {
+          "maxSize": 2000000
+        }
+      }
+    ],
+    "indexes": [
+      "CREATE INDEX idx_messages_conversation ON messages (conversation)",
+      "CREATE INDEX idx_messages_created ON messages (created)"
+    ],
+    "listRule": "",
+    "viewRule": "",
+    "createRule": "",
+    "updateRule": "",
+    "deleteRule": ""
+  },
+  {
+    "id": "generations001",
+    "name": "generations",
+    "type": "base",
+    "system": false,
+    "schema": [
+      {
+        "id": "gen_conv00001",
+        "name": "conversation",
+        "type": "relation",
+        "system": false,
+        "required": false,
+        "options": {
+          "collectionId": "conversations0001",
+          "cascadeDelete": false,
+          "minSelect": null,
+          "maxSelect": 1,
+          "displayFields": ["title"]
+        }
+      },
+      {
+        "id": "gen_prompt001",
+        "name": "prompt",
+        "type": "text",
+        "system": false,
+        "required": true,
+        "options": {
+          "min": 1,
+          "max": 50000,
+          "pattern": ""
+        }
+      },
+      {
+        "id": "gen_code00001",
+        "name": "code",
+        "type": "text",
+        "system": false,
+        "required": true,
+        "options": {
+          "min": 0,
+          "max": 500000,
+          "pattern": ""
+        }
+      },
+      {
+        "id": "gen_html00001",
+        "name": "html",
+        "type": "text",
+        "system": false,
+        "required": true,
+        "options": {
+          "min": 0,
+          "max": 500000,
+          "pattern": ""
+        }
+      },
+      {
+        "id": "gen_parent001",
+        "name": "parent",
+        "type": "relation",
+        "system": false,
+        "required": false,
+        "options": {
+          "collectionId": "generations001",
+          "cascadeDelete": false,
+          "minSelect": null,
+          "maxSelect": 1,
+          "displayFields": ["prompt"]
+        }
+      },
+      {
+        "id": "gen_meta00001",
+        "name": "metadata",
+        "type": "json",
+        "system": false,
+        "required": false,
+        "options": {
+          "maxSize": 2000000
+        }
+      }
+    ],
+    "indexes": [
+      "CREATE INDEX idx_generations_conversation ON generations (conversation)",
+      "CREATE INDEX idx_generations_parent ON generations (parent)",
+      "CREATE INDEX idx_generations_created ON generations (created)"
+    ],
+    "listRule": "",
+    "viewRule": "",
+    "createRule": "",
+    "updateRule": "",
+    "deleteRule": ""
+  },
+  {
+    "id": "checkpoints001",
+    "name": "checkpoints",
+    "type": "base",
+    "system": false,
+    "schema": [
+      {
+        "id": "chk_gen000001",
+        "name": "generation",
+        "type": "relation",
+        "system": false,
+        "required": true,
+        "options": {
+          "collectionId": "generations001",
+          "cascadeDelete": true,
+          "minSelect": null,
+          "maxSelect": 1,
+          "displayFields": ["prompt"]
+        }
+      },
+      {
+        "id": "chk_code00001",
+        "name": "code",
+        "type": "text",
+        "system": false,
+        "required": true,
+        "options": {
+          "min": 0,
+          "max": 500000,
+          "pattern": ""
+        }
+      },
+      {
+        "id": "chk_stage0001",
+        "name": "stage",
+        "type": "text",
+        "system": false,
+        "required": true,
+        "options": {
+          "min": 1,
+          "max": 50,
+          "pattern": ""
+        }
+      },
+      {
+        "id": "chk_data00001",
+        "name": "data",
+        "type": "json",
+        "system": false,
+        "required": false,
+        "options": {
+          "maxSize": 2000000
+        }
+      }
+    ],
+    "indexes": [
+      "CREATE INDEX idx_checkpoints_generation ON checkpoints (generation)"
+    ],
+    "listRule": "",
+    "viewRule": "",
+    "createRule": "",
+    "updateRule": "",
+    "deleteRule": ""
+  }
+]
