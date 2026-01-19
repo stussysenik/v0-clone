@@ -83,12 +83,14 @@ Example prompts:
 			</div>
 		{:else}
 			<!-- Code view mode -->
-			<div class="h-full overflow-auto">
+			<div class="h-full overflow-auto scroll-smooth">
 				<div class="p-4">
 					{#if content}
-						<pre class="font-mono text-sm text-[var(--color-text)] whitespace-pre-wrap"><code>{content}</code></pre>
+						<div class="animate-fade-in-scale">
+							<pre class="font-mono text-sm text-[var(--color-text)] whitespace-pre-wrap leading-relaxed"><code>{content}</code></pre>
+						</div>
 					{:else}
-						<div class="text-center py-12 text-[var(--color-text-muted)]">
+						<div class="text-center py-12 text-[var(--color-text-muted)] animate-fade-in">
 							<svg class="w-12 h-12 mx-auto mb-4 opacity-50" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 								<path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4" />
 							</svg>

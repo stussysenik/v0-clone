@@ -1,8 +1,10 @@
 <script lang="ts">
-	import type { StudioState, StudioFile } from '@v0-clone/shared'
+	import { onMount, onDestroy } from 'svelte'
+	import type { StudioState, StudioFile, ConnectionState } from '@v0-clone/shared'
+	import { subscribeToConnectionState } from '@v0-clone/shared/pocketbase'
 
 	interface Props {
-		state: StudioState
+		studioState: StudioState
 		metrics: {
 			lastGenerationMs: number
 			lastRenderMs: number
@@ -11,7 +13,37 @@
 		file: StudioFile | null
 	}
 
-	let { state, metrics, file }: Props = $props()
+	let { studioState, metrics, file }: Props = $props()
+
+	// Connection state
+	let connectionState = $state<ConnectionState>({
+		isOnline: true,
+		isConnected: false,
+		lastSyncAt: null,
+		pendingChanges: 0,
+	})
+	let unsubscribe: (() => void) | null = null
+
+	onMount(() => {
+		unsubscribe = subscribeToConnectionState((state) => {
+			connectionState = state
+		})
+	})
+
+	onDestroy(() => {
+		unsubscribe?.()
+	})
+
+	// Connection indicator status
+	const connectionStatus = $derived(() => {
+		if (connectionState.isConnected) {
+			return { color: 'bg-green-500', label: 'Connected', title: 'PocketBase connected' }
+		}
+		if (connectionState.isOnline) {
+			return { color: 'bg-yellow-500', label: 'Local', title: 'Local only (Chronicle)' }
+		}
+		return { color: 'bg-red-500', label: 'Offline', title: 'No persistence' }
+	})
 
 	function formatTime(ms: number): string {
 		if (ms === 0) return '-'
@@ -29,16 +61,27 @@
 </script>
 
 <footer class="h-6 bg-[var(--color-bg-secondary)] border-t border-[var(--color-border)] px-3 flex items-center text-xs font-mono text-[var(--color-text-muted)]">
+	<!-- Connection Status -->
+	<div class="flex items-center gap-1.5" title={connectionStatus().title}>
+		<div class="w-2 h-2 rounded-full {connectionStatus().color}"></div>
+		<span class="opacity-70">{connectionStatus().label}</span>
+		{#if connectionState.pendingChanges > 0}
+			<span class="text-yellow-400">({connectionState.pendingChanges})</span>
+		{/if}
+	</div>
+
+	<div class="w-px h-3 bg-[var(--color-border)] mx-3"></div>
+
 	<!-- State -->
 	<div class="flex items-center gap-1.5">
 		<div class="w-2 h-2 rounded-full
-			{state === 'idle' ? 'bg-green-500' :
-			 state === 'generating' ? 'bg-yellow-500 animate-pulse' :
-			 state === 'loading' ? 'bg-blue-500 animate-pulse' :
-			 state === 'rendering' ? 'bg-purple-500 animate-pulse' :
+			{studioState === 'idle' ? 'bg-green-500' :
+			 studioState === 'generating' ? 'bg-yellow-500 animate-pulse' :
+			 studioState === 'loading' ? 'bg-blue-500 animate-pulse' :
+			 studioState === 'rendering' ? 'bg-purple-500 animate-pulse' :
 			 'bg-red-500'}"
 		></div>
-		<span class="uppercase">{state}</span>
+		<span class="uppercase">{studioState}</span>
 	</div>
 
 	<div class="w-px h-3 bg-[var(--color-border)] mx-3"></div>
