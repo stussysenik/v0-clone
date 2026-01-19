@@ -1,4 +1,4 @@
-import { type LLMStreamChunk, devLog, now } from '@v0-clone/shared'
+import { type LLMStreamChunk, type FigmaDesignTokens, devLog, now } from '@v0-clone/shared'
 import { type LLMManager, getLLM } from '@v0-clone/llm'
 import type { ParsedInput } from './parse'
 
@@ -8,12 +8,18 @@ export interface GeneratedOutput {
 	sourceMap: Record<string, string> // data-oid -> code location
 }
 
+export interface GenerateOptions {
+	figmaTokens?: FigmaDesignTokens | null
+	targetFramework?: 'svelte' | 'react' | 'html'
+}
+
 /**
  * Generate stage - uses LLM to generate component code
  */
 export async function generate(
 	input: ParsedInput,
 	llm?: LLMManager,
+	options?: GenerateOptions,
 ): Promise<GeneratedOutput> {
 	const startTime = now()
 	const manager = llm ?? getLLM()
@@ -21,9 +27,14 @@ export async function generate(
 	devLog('pipeline', 'Generate stage started', {
 		provider: manager.getProviderInfo(),
 		complexity: input.metadata.estimatedComplexity,
+		intent: input.intent,
+		hasFigmaTokens: !!options?.figmaTokens,
 	})
 
-	const code = await manager.generateComponent(input.prompt)
+	// Build prompt with Figma context if available
+	const promptWithContext = buildPromptWithContext(input.prompt, options)
+
+	const code = await manager.generateComponent(promptWithContext, input.intent)
 	const durationMs = now() - startTime
 
 	// Inject data-oid attributes for source mapping
@@ -48,17 +59,23 @@ export async function generate(
 export async function* streamGenerate(
 	input: ParsedInput,
 	llm?: LLMManager,
+	options?: GenerateOptions,
 ): AsyncGenerator<{ partial: string; chunk: LLMStreamChunk }, GeneratedOutput, unknown> {
 	const startTime = now()
 	const manager = llm ?? getLLM()
 
 	devLog('pipeline', 'Stream generate started', {
 		provider: manager.getProviderInfo(),
+		intent: input.intent,
+		hasFigmaTokens: !!options?.figmaTokens,
 	})
+
+	// Build prompt with Figma context if available
+	const promptWithContext = buildPromptWithContext(input.prompt, options)
 
 	let fullCode = ''
 
-	for await (const chunk of manager.streamComponent(input.prompt)) {
+	for await (const chunk of manager.streamComponent(promptWithContext, input.intent)) {
 		fullCode += chunk
 		yield {
 			partial: fullCode,
@@ -79,6 +96,67 @@ export async function* streamGenerate(
 		language: detectLanguage(fullCode),
 		sourceMap,
 	}
+}
+
+/**
+ * Build prompt with Figma design token context
+ */
+function buildPromptWithContext(prompt: string, options?: GenerateOptions): string {
+	if (!options?.figmaTokens) {
+		return prompt
+	}
+
+	const tokens = options.figmaTokens
+
+	// Build a context string with the design tokens
+	const contextParts: string[] = []
+
+	// Add color palette
+	const allColors: string[] = []
+	for (const category of ['primary', 'secondary', 'neutral', 'semantic', 'custom'] as const) {
+		const colors = tokens.colors[category]
+		for (const [name, color] of Object.entries(colors)) {
+			allColors.push(`${name}: ${color.value}`)
+		}
+	}
+	if (allColors.length > 0) {
+		contextParts.push(`DESIGN COLORS: ${allColors.slice(0, 20).join(', ')}`)
+	}
+
+	// Add typography
+	if (tokens.typography.fontFamilies.length > 0) {
+		contextParts.push(`FONTS: ${tokens.typography.fontFamilies.join(', ')}`)
+	}
+
+	// Add spacing scale
+	const spacingValues = Object.entries(tokens.spacing)
+		.slice(0, 10)
+		.map(([name, s]) => `${s.value}${s.unit}`)
+	if (spacingValues.length > 0) {
+		contextParts.push(`SPACING SCALE: ${spacingValues.join(', ')}`)
+	}
+
+	// Add border radii
+	const radiiValues = Object.entries(tokens.borderRadii)
+		.slice(0, 5)
+		.map(([name, r]) => `${r.value}px`)
+	if (radiiValues.length > 0) {
+		contextParts.push(`BORDER RADII: ${radiiValues.join(', ')}`)
+	}
+
+	if (contextParts.length === 0) {
+		return prompt
+	}
+
+	// Prepend design context to the prompt
+	return `[DESIGN SYSTEM CONTEXT]
+${contextParts.join('\n')}
+[/DESIGN SYSTEM CONTEXT]
+
+Use the above design tokens when generating the component. Apply the colors, fonts, and spacing from the design system.
+
+USER REQUEST:
+${prompt}`
 }
 
 /**
