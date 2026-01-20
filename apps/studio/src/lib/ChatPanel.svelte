@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { onMount, onDestroy } from 'svelte'
-	import { chronicleDB } from '@v0-clone/shared'
+	import { chronicleDB, type ConversationSession } from '@v0-clone/shared'
 	import {
 		pb,
 		initPocketBase,
@@ -16,6 +16,7 @@
 		history?: Message[]
 		isGenerating?: boolean
 		onConversationChange?: (conversationId: string | null) => void
+		onSessionChange?: (sessionId: string | null) => void
 	}
 
 	export interface Message {
@@ -25,13 +26,18 @@
 		synced?: boolean
 		syncError?: boolean
 		retrying?: boolean
+		generationId?: string
 	}
 
-	let { onSubmit, history = [], isGenerating = false, onConversationChange }: Props = $props()
+	let { onSubmit, history = [], isGenerating = false, onConversationChange, onSessionChange }: Props = $props()
 
 	let currentPrompt = $state('')
 	let chatHistory = $state<Message[]>([])
 	let chatContainer: HTMLDivElement
+
+	// Chronicle session state
+	let currentSessionId = $state<string | null>(null)
+	let currentSession = $state<ConversationSession | null>(null)
 
 	// PocketBase state
 	let currentConversation = $state<Conversation | null>(null)
@@ -69,9 +75,24 @@
 			chatHistory = [...chatHistory, message]
 			onSubmit(messageContent)
 
-			// Save to chronicle (local IndexedDB)
+			// Create session if needed and save message to Chronicle session
 			try {
-				await chronicleDB.addChatMessage(message.content, message.role)
+				if (!currentSessionId) {
+					// Create new session with prompt as name (truncated)
+					const sessionName = messageContent.length > 50
+						? messageContent.slice(0, 50) + '...'
+						: messageContent
+					currentSession = await chronicleDB.createSession(sessionName)
+					currentSessionId = currentSession.id
+					onSessionChange?.(currentSessionId)
+					localStorage.setItem('currentSessionId', currentSessionId)
+				}
+
+				// Add message to session
+				await chronicleDB.addMessageToSession(currentSessionId, 'user', messageContent)
+
+				// Also save to legacy chat artifact
+				await chronicleDB.addChatMessage(message.content, message.role, currentSessionId)
 			} catch (e) {
 				console.warn('Failed to save chat to chronicle:', e)
 			}
@@ -147,6 +168,15 @@
 	}
 
 	async function handleClearChat() {
+		// Archive the Chronicle session if it exists
+		if (currentSessionId) {
+			try {
+				await chronicleDB.archiveSession(currentSessionId)
+			} catch (e) {
+				console.warn('Failed to archive session:', e)
+			}
+		}
+
 		// Archive the conversation in PocketBase if it exists
 		if (currentConversation && isPocketBaseAvailable) {
 			try {
@@ -158,26 +188,35 @@
 
 		chatHistory = []
 		currentConversation = null
+		currentSessionId = null
+		currentSession = null
 		onConversationChange?.(null)
+		onSessionChange?.(null)
 		localStorage.removeItem('chatHistory')
+		localStorage.removeItem('currentSessionId')
 	}
 
 	/**
 	 * Add assistant response to chat and sync
 	 */
-	export async function addAssistantMessage(content: string) {
+	export async function addAssistantMessage(content: string, generationId?: string) {
 		const message: Message = {
 			role: 'assistant',
 			content,
 			timestamp: Date.now(),
 			synced: false,
+			generationId,
 		}
 
 		chatHistory = [...chatHistory, message]
 
-		// Save to chronicle
+		// Save to Chronicle session
 		try {
-			await chronicleDB.addChatMessage(content, 'assistant')
+			if (currentSessionId) {
+				await chronicleDB.addMessageToSession(currentSessionId, 'assistant', content, generationId)
+			}
+			// Also save to legacy chat artifact
+			await chronicleDB.addChatMessage(content, 'assistant', currentSessionId ?? undefined)
 		} catch (e) {
 			console.warn('Failed to save assistant message to chronicle:', e)
 		}
@@ -207,6 +246,67 @@
 				chatContainer.scrollTop = chatContainer.scrollHeight
 			}
 		}, 0)
+	}
+
+	/**
+	 * Link a generation to the current session
+	 */
+	export async function linkGenerationToSession(generationId: string, code?: string) {
+		if (!currentSessionId) return
+
+		try {
+			await chronicleDB.linkGenerationToSession(currentSessionId, generationId, code)
+		} catch (e) {
+			console.warn('Failed to link generation to session:', e)
+		}
+	}
+
+	/**
+	 * Restore a Chronicle session by ID
+	 */
+	export async function restoreSession(sessionId: string) {
+		try {
+			const session = await chronicleDB.getSession(sessionId)
+			if (!session) {
+				console.warn('Session not found:', sessionId)
+				return null
+			}
+
+			currentSessionId = sessionId
+			currentSession = session
+			onSessionChange?.(sessionId)
+			localStorage.setItem('currentSessionId', sessionId)
+
+			// Convert session messages to chat history
+			chatHistory = session.messages.map((m) => ({
+				role: m.role,
+				content: m.content,
+				timestamp: m.timestamp,
+				synced: true,
+				generationId: m.generationId,
+			}))
+
+			localStorage.setItem('chatHistory', JSON.stringify(chatHistory))
+
+			return session
+		} catch (e) {
+			console.warn('Failed to restore session:', e)
+			return null
+		}
+	}
+
+	/**
+	 * Get the current session ID
+	 */
+	export function getCurrentSessionId(): string | null {
+		return currentSessionId
+	}
+
+	/**
+	 * Start a new session (archive current if exists)
+	 */
+	export async function startNewSession() {
+		await handleClearChat()
 	}
 
 	/**
@@ -257,17 +357,45 @@
 			isPocketBaseAvailable = false
 		}
 
-		// Load chat history from localStorage
-		const saved = localStorage.getItem('chatHistory')
-		if (saved) {
+		// Try to restore last Chronicle session first (primary source of truth)
+		const lastSessionId = localStorage.getItem('currentSessionId')
+		if (lastSessionId) {
 			try {
-				chatHistory = JSON.parse(saved)
+				const session = await chronicleDB.getSession(lastSessionId)
+				if (session && !session.archived) {
+					currentSessionId = session.id
+					currentSession = session
+					onSessionChange?.(session.id)
+
+					// Restore messages from session
+					if (session.messages.length > 0) {
+						chatHistory = session.messages.map((m) => ({
+							role: m.role,
+							content: m.content,
+							timestamp: m.timestamp,
+							synced: true,
+							generationId: m.generationId,
+						}))
+					}
+				}
 			} catch (e) {
-				console.warn('Failed to load chat history:', e)
+				console.warn('Failed to restore session:', e)
 			}
 		}
 
-		// Try to restore last conversation ID
+		// Fallback: Load chat history from localStorage if no session found
+		if (chatHistory.length === 0) {
+			const saved = localStorage.getItem('chatHistory')
+			if (saved) {
+				try {
+					chatHistory = JSON.parse(saved)
+				} catch (e) {
+					console.warn('Failed to load chat history:', e)
+				}
+			}
+		}
+
+		// Try to restore last conversation ID (PocketBase)
 		const lastConversationId = localStorage.getItem('currentConversationId')
 		if (lastConversationId && isPocketBaseAvailable) {
 			try {

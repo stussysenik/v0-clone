@@ -193,7 +193,7 @@ export class Pipeline {
 		input: PipelineInput,
 		options?: PipelineRunOptions,
 	): AsyncGenerator<
-		{ stage: PipelineStage; partial?: string; rendered?: RenderPayload },
+		{ stage: PipelineStage | 'complete'; partial?: string; rendered?: RenderPayload; code?: string; intent?: string },
 		PipelineOutput,
 		unknown
 	> {
@@ -243,6 +243,14 @@ export class Pipeline {
 			this.emitStage('render', 'completed')
 
 			this.metrics.totalDurationMs = now() - pipelineStart
+
+			// Yield complete event with final code and intent
+			yield {
+				stage: 'complete',
+				code: generated.code,
+				intent: parsed.intent,
+				rendered,
+			}
 
 			return {
 				code: generated.code,

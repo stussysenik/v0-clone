@@ -1,5 +1,5 @@
 import Dexie, { type Table } from 'dexie'
-import type { GenerationSession } from './types'
+import type { GenerationSession, ConversationSession, ConversationMessage } from './types'
 import { createId } from './index'
 
 // =============================================================================
@@ -40,12 +40,18 @@ export interface ChronicleStats {
 
 class ChronicleDB extends Dexie {
 	artifacts!: Table<ChronicleArtifact>
+	sessions!: Table<ConversationSession>
 
 	constructor() {
 		super('v0-chronicle')
 		this.version(1).stores({
 			// Indexes: id (auto), createdAt, compound [year+month+day], type, sessionId, archived, tags (multi-entry)
 			artifacts: '++id, createdAt, [year+month+day], type, sessionId, archived, *tags',
+		})
+		// Version 2: Add sessions table
+		this.version(2).stores({
+			artifacts: '++id, createdAt, [year+month+day], type, sessionId, archived, *tags',
+			sessions: 'id, createdAt, updatedAt, archived, projectId',
 		})
 	}
 
@@ -500,6 +506,163 @@ class ChronicleDB extends Dexie {
 		}
 		return [...tags].sort()
 	}
+
+	// =============================================================================
+	// Session Management (008 - Persistent Conversations)
+	// =============================================================================
+
+	/**
+	 * Create a new conversation session
+	 */
+	async createSession(name: string, projectId?: string): Promise<ConversationSession> {
+		const now = Date.now()
+		const session: ConversationSession = {
+			id: createId(),
+			projectId,
+			name,
+			messages: [],
+			generations: [],
+			createdAt: now,
+			updatedAt: now,
+			archived: false,
+		}
+
+		await this.sessions.add(session)
+		return session
+	}
+
+	/**
+	 * Get a session by ID
+	 */
+	async getSession(id: string): Promise<ConversationSession | undefined> {
+		return this.sessions.get(id)
+	}
+
+	/**
+	 * Update session with new data
+	 */
+	async updateSession(
+		id: string,
+		updates: Partial<Omit<ConversationSession, 'id' | 'createdAt'>>
+	): Promise<void> {
+		await this.sessions.update(id, {
+			...updates,
+			updatedAt: Date.now(),
+		})
+	}
+
+	/**
+	 * Add a message to a session
+	 */
+	async addMessageToSession(
+		sessionId: string,
+		role: 'user' | 'assistant' | 'system',
+		content: string,
+		generationId?: string
+	): Promise<ConversationMessage> {
+		const session = await this.sessions.get(sessionId)
+		if (!session) throw new Error(`Session not found: ${sessionId}`)
+
+		const message: ConversationMessage = {
+			id: createId(),
+			role,
+			content,
+			timestamp: Date.now(),
+			generationId,
+		}
+
+		await this.sessions.update(sessionId, {
+			messages: [...session.messages, message],
+			updatedAt: Date.now(),
+			metadata: {
+				...session.metadata,
+				lastPrompt: role === 'user' ? content : session.metadata?.lastPrompt,
+			},
+		})
+
+		return message
+	}
+
+	/**
+	 * Link a generation to a session
+	 */
+	async linkGenerationToSession(sessionId: string, generationId: string, code?: string): Promise<void> {
+		const session = await this.sessions.get(sessionId)
+		if (!session) throw new Error(`Session not found: ${sessionId}`)
+
+		await this.sessions.update(sessionId, {
+			generations: [...session.generations, generationId],
+			updatedAt: Date.now(),
+			metadata: {
+				...session.metadata,
+				lastGeneratedCode: code,
+			},
+		})
+	}
+
+	/**
+	 * List all active sessions (most recent first)
+	 */
+	async listSessions(limit = 20): Promise<ConversationSession[]> {
+		return this.sessions
+			.orderBy('updatedAt')
+			.reverse()
+			.filter((s) => !s.archived)
+			.limit(limit)
+			.toArray()
+	}
+
+	/**
+	 * Archive a session
+	 */
+	async archiveSession(id: string): Promise<void> {
+		await this.sessions.update(id, {
+			archived: true,
+			updatedAt: Date.now(),
+		})
+	}
+
+	/**
+	 * Unarchive a session
+	 */
+	async unarchiveSession(id: string): Promise<void> {
+		await this.sessions.update(id, {
+			archived: false,
+			updatedAt: Date.now(),
+		})
+	}
+
+	/**
+	 * Delete a session permanently
+	 */
+	async deleteSession(id: string): Promise<void> {
+		await this.sessions.delete(id)
+	}
+
+	/**
+	 * Get the most recent session or create a new one
+	 */
+	async getOrCreateCurrentSession(projectId?: string): Promise<ConversationSession> {
+		// Try to find an active session
+		const sessions = await this.listSessions(1)
+		if (sessions.length > 0) {
+			return sessions[0]
+		}
+
+		// Create a new session
+		return this.createSession('New Conversation', projectId)
+	}
+
+	/**
+	 * Get archived sessions
+	 */
+	async getArchivedSessions(): Promise<ConversationSession[]> {
+		return this.sessions
+			.orderBy('updatedAt')
+			.reverse()
+			.filter((s) => s.archived)
+			.toArray()
+	}
 }
 
 // =============================================================================
@@ -549,6 +712,34 @@ export const chronicleDB = {
 
 	exportAsJSON: (...args: Parameters<ChronicleDB['exportAsJSON']>) =>
 		getChronicleDB().exportAsJSON(...args),
+
+	// Session management methods
+	createSession: (...args: Parameters<ChronicleDB['createSession']>) =>
+		getChronicleDB().createSession(...args),
+
+	getSession: (...args: Parameters<ChronicleDB['getSession']>) =>
+		getChronicleDB().getSession(...args),
+
+	updateSession: (...args: Parameters<ChronicleDB['updateSession']>) =>
+		getChronicleDB().updateSession(...args),
+
+	addMessageToSession: (...args: Parameters<ChronicleDB['addMessageToSession']>) =>
+		getChronicleDB().addMessageToSession(...args),
+
+	linkGenerationToSession: (...args: Parameters<ChronicleDB['linkGenerationToSession']>) =>
+		getChronicleDB().linkGenerationToSession(...args),
+
+	listSessions: (...args: Parameters<ChronicleDB['listSessions']>) =>
+		getChronicleDB().listSessions(...args),
+
+	archiveSession: (...args: Parameters<ChronicleDB['archiveSession']>) =>
+		getChronicleDB().archiveSession(...args),
+
+	deleteSession: (...args: Parameters<ChronicleDB['deleteSession']>) =>
+		getChronicleDB().deleteSession(...args),
+
+	getOrCreateCurrentSession: (...args: Parameters<ChronicleDB['getOrCreateCurrentSession']>) =>
+		getChronicleDB().getOrCreateCurrentSession(...args),
 }
 
 export type { ChronicleDB }
