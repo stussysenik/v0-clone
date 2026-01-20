@@ -48,6 +48,121 @@ export interface LLMConfig {
 	temperature?: number
 }
 
+// =============================================================================
+// Model Configuration (009 - Model Selection UI)
+// =============================================================================
+
+export interface ModelOption {
+	id: string
+	name: string
+	description?: string
+	contextWindow?: number
+	maxOutput?: number
+	free?: boolean
+}
+
+export interface ProviderConfig {
+	id: LLMProvider
+	name: string
+	description: string
+	requiresApiKey: boolean
+	requiresBaseUrl: boolean
+	apiKeyEnvVar?: string
+	baseUrlEnvVar?: string
+	defaultBaseUrl?: string
+	models: ModelOption[]
+}
+
+export const PROVIDER_CONFIGS: Record<LLMProvider, ProviderConfig> = {
+	zhipu: {
+		id: 'zhipu',
+		name: 'Zhipu AI (GLM)',
+		description: 'Chinese AI lab with GLM-4 series models',
+		requiresApiKey: true,
+		requiresBaseUrl: true,
+		apiKeyEnvVar: 'ZHIPU_API_KEY',
+		baseUrlEnvVar: 'ZHIPU_BASE_URL',
+		defaultBaseUrl: 'https://api.z.ai/api/paas/v4',
+		models: [
+			{ id: 'glm-4.7-flash', name: 'GLM-4.7 Flash', description: 'Fast and affordable', contextWindow: 200000, maxOutput: 128000, free: false },
+			{ id: 'glm-4.7', name: 'GLM-4.7', description: 'Flagship model for coding', contextWindow: 200000, maxOutput: 128000, free: false },
+			{ id: 'glm-4', name: 'GLM-4', description: 'Standard model', contextWindow: 128000, maxOutput: 4096, free: false },
+		],
+	},
+	claude: {
+		id: 'claude',
+		name: 'Anthropic Claude',
+		description: 'Claude models from Anthropic',
+		requiresApiKey: true,
+		requiresBaseUrl: false,
+		apiKeyEnvVar: 'ANTHROPIC_API_KEY',
+		models: [
+			{ id: 'claude-sonnet-4-20250514', name: 'Claude Sonnet 4', description: 'Best balance of speed and quality', contextWindow: 200000, maxOutput: 8192 },
+			{ id: 'claude-3-5-sonnet-20241022', name: 'Claude 3.5 Sonnet', description: 'Previous generation', contextWindow: 200000, maxOutput: 8192 },
+			{ id: 'claude-3-5-haiku-20241022', name: 'Claude 3.5 Haiku', description: 'Fast and affordable', contextWindow: 200000, maxOutput: 8192 },
+		],
+	},
+	openai: {
+		id: 'openai',
+		name: 'OpenAI',
+		description: 'GPT models from OpenAI',
+		requiresApiKey: true,
+		requiresBaseUrl: false,
+		apiKeyEnvVar: 'OPENAI_API_KEY',
+		models: [
+			{ id: 'gpt-4o', name: 'GPT-4o', description: 'Latest multimodal model', contextWindow: 128000, maxOutput: 16384 },
+			{ id: 'gpt-4o-mini', name: 'GPT-4o Mini', description: 'Faster and cheaper', contextWindow: 128000, maxOutput: 16384 },
+			{ id: 'gpt-4-turbo', name: 'GPT-4 Turbo', description: 'Previous generation', contextWindow: 128000, maxOutput: 4096 },
+		],
+	},
+	ollama: {
+		id: 'ollama',
+		name: 'Ollama (Local)',
+		description: 'Run models locally with Ollama',
+		requiresApiKey: false,
+		requiresBaseUrl: true,
+		baseUrlEnvVar: 'OLLAMA_BASE_URL',
+		defaultBaseUrl: 'http://localhost:11434',
+		models: [
+			{ id: 'codellama:13b', name: 'CodeLlama 13B', description: 'Optimized for code', contextWindow: 16384, free: true },
+			{ id: 'llama3.2:latest', name: 'Llama 3.2', description: 'General purpose', contextWindow: 8192, free: true },
+			{ id: 'deepseek-coder:6.7b', name: 'DeepSeek Coder 6.7B', description: 'Code generation', contextWindow: 16384, free: true },
+		],
+	},
+	lmstudio: {
+		id: 'lmstudio',
+		name: 'LM Studio (Local)',
+		description: 'Run models locally with LM Studio',
+		requiresApiKey: false,
+		requiresBaseUrl: true,
+		baseUrlEnvVar: 'LMSTUDIO_BASE_URL',
+		defaultBaseUrl: 'http://localhost:1234/v1',
+		models: [
+			{ id: 'devstral-small-2', name: 'Devstral Small', description: 'Code-focused model', free: true },
+			{ id: 'loaded-model', name: 'Currently Loaded Model', description: 'Uses whatever model is loaded in LM Studio', free: true },
+		],
+	},
+	custom: {
+		id: 'custom',
+		name: 'Custom Provider',
+		description: 'Use a custom OpenAI-compatible API',
+		requiresApiKey: true,
+		requiresBaseUrl: true,
+		models: [
+			{ id: 'custom', name: 'Custom Model', description: 'Specify model ID manually' },
+		],
+	},
+}
+
+export interface StudioSettings {
+	provider: LLMProvider
+	model: string
+	apiKey?: string
+	baseUrl?: string
+	temperature: number
+	maxTokens: number
+}
+
 export interface LLMMessage {
 	role: 'system' | 'user' | 'assistant'
 	content: string
@@ -220,6 +335,34 @@ export interface GenerationCheckpoint {
 }
 
 export type TelemetryEventType = 'pipeline' | 'llm' | 'render' | 'websocket' | 'error' | 'user' | 'checkpoint'
+
+// =============================================================================
+// Conversation Session Types (008 - Persistent Conversations)
+// =============================================================================
+
+export interface ConversationMessage {
+	id: string
+	role: 'user' | 'assistant' | 'system'
+	content: string
+	timestamp: number
+	generationId?: string // Links to a generation snapshot
+}
+
+export interface ConversationSession {
+	id: string
+	projectId?: string
+	name: string
+	messages: ConversationMessage[]
+	generations: string[] // Snapshot IDs from Chronicle
+	createdAt: number
+	updatedAt: number
+	archived: boolean
+	metadata?: {
+		lastPrompt?: string
+		lastGeneratedCode?: string
+		intent?: string
+	}
+}
 
 // =============================================================================
 // Aesthetic Curation Types (007)

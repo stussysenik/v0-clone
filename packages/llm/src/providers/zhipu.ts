@@ -9,7 +9,7 @@ import {
 	now,
 } from '@v0-clone/shared'
 
-const DEFAULT_MODEL = 'glm-4'
+const DEFAULT_MODEL = 'glm-4.7-flash'
 const DEFAULT_MAX_TOKENS = 4096
 
 /**

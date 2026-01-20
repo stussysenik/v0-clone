@@ -7,11 +7,13 @@
 	import StatusBar from '$lib/StatusBar.svelte'
 	import ChroniclePanel from '$lib/ChroniclePanel.svelte'
 	import FigmaImporter from '$lib/FigmaImporter.svelte'
+	import SessionList from '$lib/SessionList.svelte'
+	import SettingsPanel from '$lib/SettingsPanel.svelte'
 	import StyleInspector from '$lib/overlays/StyleInspector.svelte'
 	import ContextMenu, { type ContextMenuAction } from '$lib/overlays/ContextMenu.svelte'
 	import type { SelectedElement } from '$lib/overlays/ElementSelector.svelte'
 	import { Dialog, ThemeToggle } from '$lib/ui'
-	import type { StudioState, StudioFile, TelemetryEvent, PipelineOutput, ChronicleArtifact, FigmaDesignTokens, FigmaImportResult } from '@v0-clone/shared'
+	import type { StudioState, StudioFile, TelemetryEvent, PipelineOutput, ChronicleArtifact, FigmaDesignTokens, FigmaImportResult, ConversationSession, StudioSettings } from '@v0-clone/shared'
 	import { addOidAttributes, applyStyleUpdate, applyTailwindUpdate, cssToTailwind } from '$lib/utils/code-sync'
 	import {
 		chronicleDB,
@@ -37,10 +39,18 @@
 	let showDevInfo = $state(true) // DEV_INFO flag
 	let showChronicle = $state(false) // Chronicle panel toggle
 	let showFigma = $state(false) // Figma integration toggle
+	let showSessions = $state(false) // Session list toggle
+	let showSettings = $state(false) // Model settings panel toggle
 	let error = $state<string | null>(null)
 	let currentStage = $state<'parse' | 'generate' | 'render' | null>(null)
 	let chatHistory = $state<Message[]>([])
 	let currentPrompt = $state<string>('') // Track current prompt for chronicle
+
+	// Session state
+	let currentSessionId = $state<string | null>(null)
+
+	// Component refs
+	let chatPanelRef: ReturnType<typeof ChatPanel> | null = $state(null)
 
 	// Figma integration state
 	let figmaTokens = $state<FigmaDesignTokens | null>(null)
@@ -60,10 +70,11 @@
 	let lastSavedCode = $state<string>('')
 	let isSaving = $state(false)
 
-	// Three-panel layout splits
-	let leftPanelWidth = $state(25) // Chat panel percentage
-	let rightPanelWidth = $state(25) // Code inspector percentage
-	let chroniclePanelWidth = $state(20) // Chronicle panel percentage (when visible)
+	// Preview-centric layout (65% preview, 35% chat+code)
+	let leftPanelWidth = $state(20) // Chat panel percentage (reduced for preview focus)
+	let rightPanelWidth = $state(20) // Code inspector percentage (reduced for preview focus)
+	let chroniclePanelWidth = $state(15) // Chronicle panel percentage (when visible)
+	let sessionsPanelWidth = $state(15) // Sessions panel percentage (when visible)
 
 	// Computed state for dialog
 	let showErrorDialog = $derived(error !== null)
@@ -119,6 +130,64 @@
 	// Handle conversation change from ChatPanel
 	function handleConversationChange(conversationId: string | null) {
 		currentConversationId = conversationId
+	}
+
+	// Handle session change from ChatPanel
+	function handleSessionChange(sessionId: string | null) {
+		currentSessionId = sessionId
+	}
+
+	// Handle session selection from SessionList
+	async function handleSessionSelect(session: ConversationSession) {
+		if (chatPanelRef) {
+			const restored = await chatPanelRef.restoreSession(session.id)
+			if (restored) {
+				currentSessionId = session.id
+				// If session has generations, restore the last one
+				if (session.generations.length > 0 && session.metadata?.lastGeneratedCode) {
+					generatedCode = session.metadata.lastGeneratedCode
+					await regeneratePreview(generatedCode)
+				}
+				showSessions = false // Close panel after selection
+				addTelemetry('pipeline', { event: 'session_restored', sessionId: session.id })
+			}
+		}
+	}
+
+	// Handle new session request
+	async function handleNewSession() {
+		if (chatPanelRef) {
+			await chatPanelRef.startNewSession()
+			currentSessionId = null
+			generatedCode = ''
+			previewHtml = ''
+			showSessions = false
+			addTelemetry('pipeline', { event: 'new_session_started' })
+		}
+	}
+
+	// Handle settings change
+	async function handleSettingsChange(settings: StudioSettings) {
+		addTelemetry('pipeline', {
+			event: 'settings_changed',
+			provider: settings.provider,
+			model: settings.model,
+		})
+
+		// Reload provider info after settings change
+		try {
+			const res = await fetch('/api/provider', {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify(settings),
+			})
+			if (res.ok) {
+				providerInfo = await res.json()
+				addTelemetry('llm', { event: 'provider_updated', provider: providerInfo?.provider, model: providerInfo?.model })
+			}
+		} catch (err) {
+			console.warn('Failed to update provider:', err)
+		}
 	}
 
 	// Handle Figma import
@@ -467,10 +536,26 @@
 			const decoder = new TextDecoder()
 			let buffer = ''
 			let lastCheckpointTime = 0
+			const GENERATION_TIMEOUT_MS = 30000 // 30 second timeout
+			let lastActivityTime = Date.now()
 
 			while (true) {
-				const { done, value } = await reader.read()
+				// Check for timeout
+				if (Date.now() - lastActivityTime > GENERATION_TIMEOUT_MS) {
+					reader.cancel()
+					throw new Error('Generation timed out after 30 seconds')
+				}
+
+				const { done, value } = await Promise.race([
+					reader.read(),
+					new Promise<{ done: true; value: undefined }>((_, reject) =>
+						setTimeout(() => reject(new Error('Read timeout')), GENERATION_TIMEOUT_MS)
+					),
+				])
 				if (done) break
+
+				// Update activity timestamp on data received
+				lastActivityTime = Date.now()
 
 				buffer += decoder.decode(value, { stream: true })
 				const lines = buffer.split('\n')
@@ -492,9 +577,9 @@
 							currentStage = update.stage as 'parse' | 'generate' | 'render'
 						}
 
-						// Stream partial code
+						// Stream partial code (partial is already accumulated, don't append)
 						if (update.partial) {
-							generatedCode += update.partial
+							generatedCode = update.partial
 
 							// Create streaming checkpoint every 500ms if connected
 							const now = Date.now()
@@ -513,6 +598,19 @@
 						if (update.rendered?.html) {
 							previewHtml = update.rendered.html
 							metrics.lastRenderMs = performance.now() - startTime
+						}
+
+						// Handle complete event - generation finished
+						if (update.stage === 'complete' && update.code) {
+							generatedCode = update.code
+							if (update.rendered?.html) {
+								previewHtml = update.rendered.html
+							}
+							addTelemetry('pipeline', {
+								event: 'generation_stream_complete',
+								intent: update.intent,
+								codeLength: update.code.length,
+							})
 						}
 					} catch (parseErr) {
 						// Skip invalid JSON lines
@@ -656,6 +754,7 @@
 		// Load toggle states from localStorage
 		showChronicle = localStorage.getItem('showChronicle') === 'true'
 		showFigma = localStorage.getItem('showFigma') === 'true'
+		showSessions = localStorage.getItem('showSessions') === 'true'
 
 		// Initialize PocketBase
 		try {
@@ -747,6 +846,24 @@
 			{/if}
 		</div>
 
+		<!-- Model Settings button -->
+		<button
+			onclick={() => showSettings = true}
+			class="px-3 py-1.5 text-sm rounded-md transition-all-smooth flex items-center gap-2
+				bg-[var(--color-bg-tertiary)] text-[var(--color-text-muted)] hover:bg-[var(--color-border)] hover:text-[var(--color-text)]"
+			title="Configure model settings"
+		>
+			<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+				<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+				<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+			</svg>
+			{#if providerInfo}
+				<span class="hidden sm:inline text-xs">{providerInfo.model}</span>
+			{:else}
+				<span class="hidden sm:inline">Settings</span>
+			{/if}
+		</button>
+
 		<!-- Theme toggle -->
 		<ThemeToggle />
 
@@ -771,6 +888,22 @@
 			{#if figmaTokens}
 				<span class="w-2 h-2 rounded-full bg-green-400"></span>
 			{/if}
+		</button>
+
+		<!-- Sessions toggle -->
+		<button
+			onclick={() => {
+				showSessions = !showSessions
+				localStorage.setItem('showSessions', String(showSessions))
+			}}
+			class="px-3 py-1.5 text-sm rounded-md transition-all-smooth flex items-center gap-1.5
+				{showSessions ? 'bg-blue-600 text-white' : 'bg-[var(--color-bg-tertiary)] text-[var(--color-text-muted)] hover:bg-[var(--color-border)]'}"
+			title="View conversation history"
+		>
+			<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+				<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
+			</svg>
+			Sessions
 		</button>
 
 		<!-- Chronicle toggle -->
@@ -812,12 +945,28 @@
 			{/if}
 
 			<ChatPanel
+				bind:this={chatPanelRef}
 				onSubmit={handleChatSubmit}
 				history={chatHistory}
 				isGenerating={state === 'generating'}
 				onConversationChange={handleConversationChange}
+				onSessionChange={handleSessionChange}
 			/>
 		</div>
+
+		<!-- Sessions panel (slide-out from left, over chat) -->
+		{#if showSessions}
+			<div
+				class="absolute left-0 top-14 bottom-8 z-10 animate-slide-in-left border-r border-[var(--color-border)] shadow-lg"
+				style="width: {sessionsPanelWidth + leftPanelWidth}%"
+			>
+				<SessionList
+					onSessionSelect={handleSessionSelect}
+					onNewSession={handleNewSession}
+					{currentSessionId}
+				/>
+			</div>
+		{/if}
 
 		<!-- Left divider -->
 		<div
@@ -912,6 +1061,14 @@
 			</button>
 		{/snippet}
 	</Dialog>
+
+	<!-- Settings Panel -->
+	{#if showSettings}
+		<SettingsPanel
+			onClose={() => showSettings = false}
+			onSettingsChange={handleSettingsChange}
+		/>
+	{/if}
 
 	<!-- Dev info panel -->
 	{#if showDevInfo}

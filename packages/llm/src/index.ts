@@ -147,7 +147,7 @@ export class LLMManager {
 			case 'lmstudio':
 				return 'devstral-small-2'
 			case 'zhipu':
-				return 'glm-4'
+				return 'glm-4.7-flash'
 			default:
 				return 'claude-sonnet-4-20250514'
 		}
