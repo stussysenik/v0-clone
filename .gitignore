@@ -53,3 +53,9 @@ deps
 # Nix
 result
 .direnv
+
+# TypeScript build info
+*.tsbuildinfo
+
+# Claude Code
+.claude/
