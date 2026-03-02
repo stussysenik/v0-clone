@@ -1,4 +1,17 @@
+<div align="center">
+
 # v0-clone
+
+### Production-ready AI UI generation engine
+
+![Svelte](https://img.shields.io/badge/Svelte-5-FF3E00?style=flat-square&logo=svelte&logoColor=white)
+![TypeScript](https://img.shields.io/badge/TypeScript-5.x-3178C6?style=flat-square&logo=typescript)
+![Bun](https://img.shields.io/badge/Bun-Runtime-F9F1E1?style=flat-square&logo=bun)
+![Status](https://img.shields.io/badge/Status-Active-green?style=flat-square)
+
+</div>
+
+---
 
 A production-ready AI UI generation engine with intent-aware prompting, visual editing, and real-time preview.
 
