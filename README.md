@@ -2,6 +2,9 @@
 
 # v0-clone
 
+![Demo](demo.gif)
+
+
 ### Production-ready AI UI generation engine
 
 ![Svelte](https://img.shields.io/badge/Svelte-5-FF3E00?style=flat-square&logo=svelte&logoColor=white)
